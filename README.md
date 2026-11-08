@@ -26,6 +26,7 @@ Klasör GitHub Pages, Netlify ya da Cloudflare Pages'e olduğu gibi yüklenir. D
 - İmza: SVG (yalnız `<path>`) ise vektör olarak PDF'e çizilir. Karmaşık SVG ve PNG/JPG/WEBP yüksek çözünürlüklü şeffaf resme çevrilir (beyaz arka plan otomatik temizlenir). "Elle çiz" ile çizilen imza vektördür.
 - Konum: 9 hazır konum (3×3) ya da önizlemede sürükle; tekerlekle boyut, ok tuşlarıyla ince ayar. Konum 0–1 oranı olarak tutulur ve her sayfada imza kenardan %4 boşlukla sayfa içinde kalacak şekilde sınırlanır. Köşe seçilince boyut %45'ten büyükse %30'a iner.
 - PDF: seçilen konuma, sayfa yönüne göre eğimle. Döndürülmüş (/Rotate) sayfalar desteklenir. Koyu sayfalarda (ortalama parlaklık < 110) beyaz imza.
+- Kalıcı imza (PDF, isteğe bağlı): imzanın kapladığı bölge imzayla birlikte 300 dpi JPEG'e çevrilir; orijinal sayfa yeni sayfaya form XObject olarak konur ve o bölgede delik bırakan bir kırpma yoluyla çizilir, delik bu resimle kapanır. Sayfanın geri kalanı vektör kalır; metin (kırpılmış bölgedeki dahil) seçilir ve aranır. Resmi silen yalnız boşluk bulur. Bedel: dosya büyür (2 sayfalık formül kağıdında 0,6 MB → 2 MB). Kırpılan vektör içerik dosyada durur; PDF iç yapısını elle düzenleyebilen biri kırpmayı kaldırırsa temiz metni geri getirebilir, sıradan düzenleyiciler bunu yapmaz.
 - HTML: `</body>` öncesine işaretli blok; konum CSS `clamp()` ile ekran içinde tutulur; yeniden imzalayınca eskisi değişir.
 - Güvenlik: CSP `connect-src` yalnız kendi kaynağı ve blob; pdf.js `isEvalSupported:false` (3.11'deki bilinen font tabanlı kod çalıştırma açığına karşı).
 

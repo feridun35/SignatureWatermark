@@ -113,6 +113,15 @@
       <input type="text" class="metin-girdi" id="atla" data-i18n-ph="skipPh" placeholder="örn. 1, 5-8, 12" inputmode="numeric" autocomplete="off">
     </section>
 
+    <!-- Koruma -->
+    <section class="panel sadece-pdf">
+      <div class="baslik-satir"><h2 data-i18n="secProtect">Koruma</h2></div>
+      <label class="anahtar-satir tam"><span data-i18n="permanent">Kalıcı imza</span>
+        <span class="switch"><input type="checkbox" id="kalici"><span class="slider"></span></span>
+      </label>
+      <p class="kucuk-not" data-i18n="permNote">İmza, üstünden geçtiği bölgeyle birlikte 300 dpi resme gömülür. Sayfanın geri kalanı vektör kalır; metin seçilebilir ve aranabilir. İmzayı silmek isteyen yalnız boşluk bulur.</p>
+    </section>
+
     <!-- Çıktı -->
     <section class="panel">
       <div class="baslik-satir"><h2 data-i18n="secOut">Çıktı</h2></div>
@@ -138,6 +147,7 @@
         <div class="tt-cubuk"><i></i><i></i><i></i><span>index.html</span></div>
         <div class="tt-icerik"><b></b><p></p><p></p><p></p><b class="k"></b><p></p><p></p></div>
       </div>
+      <div class="gomme-bolge" id="gomme-bolge" hidden></div>
       <div class="ust-imza" id="ust-imza" tabindex="0" data-i18n-aria="dragAria"></div>
     </div>
     <div class="karsilama" id="karsilama">

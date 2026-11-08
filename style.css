@@ -159,6 +159,8 @@ body.panel-kapali #sayfa-tuval{max-width:calc(100vw - 80px)}
 .ust-imza:hover::after,.ust-imza:focus-visible::after,.ust-imza.surukleniyor::after{border-color:var(--accent-blue)}
 .ust-imza .gorunur{opacity:var(--op,.1)}
 .ust-imza.atlanan{display:none}
+.gomme-bolge{position:absolute;pointer-events:none;border:1.5px dashed #FF9800;background:rgba(255,152,0,.06);border-radius:2px}
+.gomme-bolge::after{content:attr(data-etiket);position:absolute;left:-1.5px;top:-21px;font:600 11px Inter,"Segoe UI",sans-serif;color:#fff;background:#FF9800;padding:2px 7px;border-radius:4px 4px 0 0;white-space:nowrap;line-height:1.4}
 
 .karsilama{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;background:rgba(30,30,30,.4);backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,.05);border-radius:16px;padding:40px 60px;box-shadow:0 20px 50px rgba(0,0,0,.5);pointer-events:none;max-width:min(560px,90%)}
 [data-theme="light"] .karsilama{background:rgba(255,255,255,.6);border-color:rgba(0,0,0,.1);box-shadow:0 20px 50px rgba(0,0,0,.15)}

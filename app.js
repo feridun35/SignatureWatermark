@@ -2,7 +2,7 @@
 (() => {
 'use strict';
 
-const { PDFDocument, rgb, pushGraphicsState, popGraphicsState, concatTransformationMatrix } = PDFLib;
+const { PDFDocument, PDFName, degrees, rgb, pushGraphicsState, popGraphicsState, concatTransformationMatrix, rectangle, clipEvenOdd, endPath } = PDFLib;
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.js';
 const PDFJS_OPT = { isEvalSupported: false, standardFontDataUrl: 'vendor/standard_fonts/', disableFontFace: true };
 
@@ -56,6 +56,7 @@ function ayar() {
     aciDikey: +$('aci-d').value,
     renk: $('renk').value,
     otoKoyu: $('oto-koyu').checked,
+    kalici: $('kalici').checked,
     atla: sayfaListesi($('atla').value),
     pos: { ...durum.pos },
   };
@@ -210,66 +211,133 @@ function gorseldenPdf(vx, vy, rot, k) {
 }
 
 /* ---------------------------------------------------------- PDF basma */
-async function koyuSayfalar(bayt) {
-  const doc = await pdfjsLib.getDocument({ data: bayt.slice(0), ...PDFJS_OPT }).promise;
-  const sonuc = [];
-  try {
-    for (let i = 1; i <= doc.numPages; i++) {
-      const sayfa = await doc.getPage(i), v0 = sayfa.getViewport({ scale: 1 });
-      const vp = sayfa.getViewport({ scale: 70 / Math.max(v0.width, v0.height) });
-      const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(vp.width)); c.height = Math.max(1, Math.round(vp.height));
-      const x = c.getContext('2d', { willReadFrequently: true }); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height);
-      await sayfa.render({ canvasContext: x, viewport: vp }).promise;
-      const d = x.getImageData(0, 0, c.width, c.height).data; let tp = 0;
-      for (let p = 0; p < d.length; p += 4) tp += 0.2126*d[p] + 0.7152*d[p+1] + 0.0722*d[p+2];
-      sonuc.push(tp / (d.length / 4) < 110); sayfa.cleanup();
-    }
-  } finally { doc.destroy(); }
-  return sonuc;
+const KALICI_DPI = 300, KALICI_PAY = 6;   // kalıcı modda bölge çözünürlüğü ve imza çevresindeki pay (pt)
+
+async function sayfaKoyuMu(sayfa) {
+  const v0 = sayfa.getViewport({ scale: 1 }), vp = sayfa.getViewport({ scale: 70 / Math.max(v0.width, v0.height) });
+  const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(vp.width)); c.height = Math.max(1, Math.round(vp.height));
+  const x = c.getContext('2d', { willReadFrequently: true }); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height);
+  await sayfa.render({ canvasContext: x, viewport: vp }).promise;
+  const d = x.getImageData(0, 0, c.width, c.height).data; let tp = 0;
+  for (let p = 0; p < d.length; p += 4) tp += 0.2126*d[p] + 0.7152*d[p+1] + 0.0722*d[p+2];
+  return tp / (d.length / 4) < 110;
 }
 function hex(h) { const n = parseInt(h.slice(1), 16); return rgb(((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255); }
 
+/** İmzayı tuvale çizer. Tuvalin (0,0) noktası görünen sayfada (ox,oy); k = piksel/pt. */
+function imzayiTuvaleCiz(x, sig, renk, opaklik, cx, cy, s, aci, ox, oy, k) {
+  x.save();
+  x.translate((cx - ox) * k, (cy - oy) * k); x.rotate(-rad(aci)); x.scale(s * k, s * k);
+  x.globalAlpha = opaklik;
+  if (sig.kind === 'vector') {
+    const b = sig.box; x.translate(-(b.x + b.w / 2), -(b.y + b.h / 2));
+    x.lineJoin = 'round'; x.lineCap = 'round';
+    for (const y of sig.paths) {
+      const p = new Path2D(y.d);
+      if (y.fill) { x.fillStyle = renk; x.fill(p); }
+      if (y.stroke || !y.fill) { x.strokeStyle = renk; x.lineWidth = y.sw; x.stroke(p); }
+    }
+  } else x.drawImage(renkli(sig, renk), -sig.w / 2, -sig.h / 2);
+  x.restore();
+}
+
+/** Görünen sayfada imzanın kapladığı bölge (pt), sayfa içine kırpılmış. */
+function imzaBolgesi(yer, sig, aci, gW, gH) {
+  const { w, h } = imzaBoyut(sig), dk = donukKutu(w * yer.s, h * yer.s, aci);
+  return {
+    x0: Math.max(0, yer.cx - dk.w / 2 - KALICI_PAY), y0: Math.max(0, yer.cy - dk.h / 2 - KALICI_PAY),
+    x1: Math.min(gW, yer.cx + dk.w / 2 + KALICI_PAY), y1: Math.min(gH, yer.cy + dk.h / 2 + KALICI_PAY),
+  };
+}
+
+/** Kalıcı mod: imzanın kapladığı bölgeyi (imza dahil) resme çevirir; orijinal sayfa o bölgede delik bırakılarak kırpılır. */
+async function bolgeyiGom(belge, kaynak, i, jsSayfa, yer, aci, sig, hexRenk, opaklik, gW, gH) {
+  const eski = belge.getPage(i);
+  const rot = ((eski.getRotation().angle % 360) + 360) % 360;
+  const mb = eski.getMediaBox(), cb = eski.getCropBox();
+  const { x0: rx0, y0: ry0, x1: rx1, y1: ry1 } = imzaBolgesi(yer, sig, aci, gW, gH);
+  const rw = rx1 - rx0, rh = ry1 - ry0, k = KALICI_DPI / 72;
+  // bölgeyi 300 dpi çiz, imzayı üstüne bas
+  const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(rw * k)); c.height = Math.max(1, Math.round(rh * k));
+  const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height);
+  await jsSayfa.render({ canvasContext: x, viewport: jsSayfa.getViewport({ scale: k }), transform: [1, 0, 0, 1, -rx0 * k, -ry0 * k] }).promise;
+  imzayiTuvaleCiz(x, sig, hexRenk, opaklik, yer.cx, yer.cy, yer.s, aci, rx0, ry0, k);
+  const jpg = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.93));
+  c.width = c.height = 0;
+  const resim = await belge.embedJpg(new Uint8Array(await jpg.arrayBuffer()));
+  // yeni sayfa: orijinal içerik (bölgede delikli) + bölgenin resmi
+  const yeni = belge.insertPage(i + 1, [mb.width, mb.height]);
+  yeni.setMediaBox(mb.x, mb.y, mb.width, mb.height); yeni.setCropBox(cb.x, cb.y, cb.width, cb.height); yeni.setRotation(degrees(rot));
+  const annots = eski.node.get(PDFName.of('Annots')); if (annots) yeni.node.set(PDFName.of('Annots'), annots);
+  const gomulu = await belge.embedPage(kaynak.getPage(i));
+  const [ax, ay] = gorseldenPdf(rx0, ry0, rot, cb), [bx, by] = gorseldenPdf(rx1, ry1, rot, cb);
+  const ic = 0.4;   // delik resimden biraz küçük: kenarda ince çizgi kalmasın
+  const hx = Math.min(ax, bx) + ic, hy = Math.min(ay, by) + ic, hw = Math.abs(bx - ax) - 2 * ic, hh = Math.abs(by - ay) - 2 * ic;
+  yeni.pushOperators(pushGraphicsState(), rectangle(mb.x - 1, mb.y - 1, mb.width + 2, mb.height + 2), rectangle(hx, hy, hw, hh), clipEvenOdd(), endPath());
+  yeni.drawPage(gomulu, { x: mb.x, y: mb.y });
+  yeni.pushOperators(popGraphicsState());
+  const [px, py] = gorseldenPdf((rx0 + rx1) / 2, (ry0 + ry1) / 2, rot, cb), th = rad(rot);
+  yeni.pushOperators(pushGraphicsState(), concatTransformationMatrix(Math.cos(th), Math.sin(th), -Math.sin(th), Math.cos(th), px, py));
+  yeni.drawImage(resim, { x: -rw / 2, y: -rh / 2, width: rw, height: rh });
+  yeni.pushOperators(popGraphicsState());
+  belge.removePage(i);
+}
+
 async function pdfDamgala(bayt, a, ilerle) {
-  let belge;
+  let belge, kaynak = null, js = null;
   try { belge = await PDFDocument.load(bayt, { updateMetadata: false }); }
   catch (e) { throw new Error(/encrypt/i.test(e.message) ? t('eEnc') : t('ePdf')); }
+  if (a.kalici) kaynak = await PDFDocument.load(bayt, { updateMetadata: false });
+  if (a.otoKoyu || a.kalici) {
+    try { js = await pdfjsLib.getDocument({ data: bayt.slice(0), ...PDFJS_OPT }).promise; }
+    catch (e) { if (a.kalici) throw new Error(t('ePdf')); js = null; }
+  }
   const sig = durum.sig, { w: sw, h: sh } = imzaBoyut(sig);
-  let koyu = null;
-  if (a.otoKoyu) { try { koyu = await koyuSayfalar(bayt); } catch (e) { koyu = null; } }
   const gorsel = {};
   const gorselGetir = async (renk) => {
     if (!gorsel[renk]) { const blob = await new Promise(r => renkli(sig, renk).toBlob(r, 'image/png')); gorsel[renk] = await belge.embedPng(new Uint8Array(await blob.arrayBuffer())); }
     return gorsel[renk];
   };
-  const sayfalar = belge.getPages();
-  for (let i = 0; i < sayfalar.length; i++) {
-    ilerle && ilerle(i + 1, sayfalar.length);
-    if (a.atla.has(i + 1)) continue;
-    const sayfa = sayfalar[i];
-    const rot = ((sayfa.getRotation().angle % 360) + 360) % 360;
-    const kutu = sayfa.getCropBox();
-    const gW = rot % 180 ? kutu.height : kutu.width, gH = rot % 180 ? kutu.width : kutu.height;   // kullanıcının gördüğü ölçü
-    const aci = gH > gW ? a.aciDikey : a.aciYatay;
-    const { s, cx, cy } = yerlesim(gW, gH, sw, sh, aci, a.genislik, a.pos);
-    const [px, py] = gorseldenPdf(cx, cy, rot, kutu);
-    const hexRenk = koyu && koyu[i] ? '#ffffff' : a.renk, renk = hex(hexRenk);
-    const th = rad(aci + rot), cos = Math.cos(th), sin = Math.sin(th);
-    sayfa.pushOperators(pushGraphicsState(), concatTransformationMatrix(cos, sin, -sin, cos, px, py));
-    if (sig.kind === 'vector') {
-      const b = sig.box, bx = b.x + b.w / 2, by = b.y + b.h / 2;
-      for (const y of sig.paths) {
-        const o = { x: -s * bx, y: s * by, scale: s, opacity: a.opaklik, borderOpacity: a.opaklik };
-        if (y.fill) o.color = renk;
-        if (y.stroke || !y.fill) { o.borderColor = renk; o.borderWidth = y.sw; }
-        sayfa.drawSvgPath(y.d, o);
+  try {
+    const n = belge.getPageCount();
+    for (let i = 0; i < n; i++) {
+      ilerle && ilerle(i + 1, n);
+      if (a.atla.has(i + 1)) continue;
+      const sayfa = belge.getPage(i);
+      const rot = ((sayfa.getRotation().angle % 360) + 360) % 360;
+      const kutu = sayfa.getCropBox();
+      const gW = rot % 180 ? kutu.height : kutu.width, gH = rot % 180 ? kutu.width : kutu.height;   // kullanıcının gördüğü ölçü
+      const aci = gH > gW ? a.aciDikey : a.aciYatay;
+      const yer = yerlesim(gW, gH, sw, sh, aci, a.genislik, a.pos);
+      const jsSayfa = js ? await js.getPage(i + 1) : null;
+      let koyu = false;
+      if (a.otoKoyu && jsSayfa) { try { koyu = await sayfaKoyuMu(jsSayfa); } catch (e) { koyu = false; } }
+      const hexRenk = koyu ? '#ffffff' : a.renk;
+      if (a.kalici) {
+        await bolgeyiGom(belge, kaynak, i, jsSayfa, yer, aci, sig, hexRenk, a.opaklik, gW, gH);
+      } else {
+        const { s, cx, cy } = yer, renk = hex(hexRenk);
+        const [px, py] = gorseldenPdf(cx, cy, rot, kutu);
+        const th = rad(aci + rot), cos = Math.cos(th), sin = Math.sin(th);
+        sayfa.pushOperators(pushGraphicsState(), concatTransformationMatrix(cos, sin, -sin, cos, px, py));
+        if (sig.kind === 'vector') {
+          const b = sig.box, bx = b.x + b.w / 2, by = b.y + b.h / 2;
+          for (const y of sig.paths) {
+            const o = { x: -s * bx, y: s * by, scale: s, opacity: a.opaklik, borderOpacity: a.opaklik };
+            if (y.fill) o.color = renk;
+            if (y.stroke || !y.fill) { o.borderColor = renk; o.borderWidth = y.sw; }
+            sayfa.drawSvgPath(y.d, o);
+          }
+        } else {
+          const im = await gorselGetir(hexRenk);
+          sayfa.drawImage(im, { x: -sw * s / 2, y: -sh * s / 2, width: sw * s, height: sh * s, opacity: a.opaklik });
+        }
+        sayfa.pushOperators(popGraphicsState());
       }
-    } else {
-      const im = await gorselGetir(hexRenk);
-      sayfa.drawImage(im, { x: -sw * s / 2, y: -sh * s / 2, width: sw * s, height: sh * s, opacity: a.opaklik });
+      if (jsSayfa) jsSayfa.cleanup();
+      if (i % 4 === 3) await new Promise(r => setTimeout(r));
     }
-    sayfa.pushOperators(popGraphicsState());
-    if (i % 8 === 7) await new Promise(r => setTimeout(r));
-  }
+  } finally { if (js) js.destroy(); }
   return await belge.save();
 }
 
@@ -489,6 +557,7 @@ async function sayfayiCiz() {
   const doc = durum.onizlemeDoc; if (!doc) return;
   const bu = onizSayac;
   const sayfa = await doc.getPage(durum.onizlemeSayfa), v0 = sayfa.getViewport({ scale: 1 });
+  durum.onizlemePt = { w: v0.width, h: v0.height };
   const vp = sayfa.getViewport({ scale: Math.min(2.2, 1400 / Math.max(v0.width, v0.height)) });
   const c = $('sayfa-tuval'); c.width = Math.round(vp.width); c.height = Math.round(vp.height);
   const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height);
@@ -508,7 +577,7 @@ let sonOnizleme = null;   // sürükleme için son yerleşim
 function imzaUstuCiz() {
   const ust = $('ust-imza'), c = $('sayfa-tuval');
   ust.textContent = ''; sonOnizleme = null;
-  if (!durum.sig || $('sayfa-kap').hidden) { ust.hidden = true; return; }
+  if (!durum.sig || $('sayfa-kap').hidden) { ust.hidden = true; $('gomme-bolge').hidden = true; return; }
   const a = ayar(), cw = c.clientWidth, ch = c.clientHeight;
   if (!cw || !ch) { ust.hidden = true; return; }
   const aci = durum.mod === 'pdf' && ch > cw ? a.aciDikey : a.aciYatay;
@@ -524,6 +593,14 @@ function imzaUstuCiz() {
   ust.style.transform = `rotate(${-aci}deg)`;
   ust.appendChild(el);
   sonOnizleme = { cw, ch, cx: yer.cx, cy: yer.cy };
+  const bolge = $('gomme-bolge'), atla = durum.mod === 'pdf' && a.atla.has(durum.onizlemeSayfa);
+  if (durum.mod === 'pdf' && a.kalici && !atla && durum.onizlemePt) {
+    const f = cw / durum.onizlemePt.w, dk = donukKutu(w * yer.s, h * yer.s, aci), pay = KALICI_PAY * f;
+    const x0 = Math.max(0, yer.cx - dk.w / 2 - pay), y0 = Math.max(0, yer.cy - dk.h / 2 - pay);
+    const x1 = Math.min(cw, yer.cx + dk.w / 2 + pay), y1 = Math.min(ch, yer.cy + dk.h / 2 + pay);
+    Object.assign(bolge.style, { left: x0 + 'px', top: y0 + 'px', width: (x1 - x0) + 'px', height: (y1 - y0) + 'px' });
+    bolge.dataset.etiket = t('permArea'); bolge.hidden = false;
+  } else bolge.hidden = true;
 }
 function onizlemeOlcekle() { imzaUstuCiz(); }
 window.addEventListener('resize', onizlemeOlcekle);
@@ -575,7 +652,7 @@ function ciktiGuncelle() {
   $('o-opak').textContent = $('opak').value + '%'; $('o-gen').textContent = $('gen').value + '%';
   $('o-aci-y').textContent = $('aci-y').value + '°'; $('o-aci-d').textContent = $('aci-d').value + '°';
 }
-['opak','gen','aci-y','aci-d','renk','oto-koyu','atla'].forEach(id => $(id).addEventListener('input', () => { ciktiGuncelle(); imzaUstuCiz(); }));
+['opak','gen','aci-y','aci-d','renk','oto-koyu','atla','kalici'].forEach(id => $(id).addEventListener('input', () => { ciktiGuncelle(); imzaUstuCiz(); }));
 function guncelle() { $('bas').disabled = !(durum.sig && durum.dosyalar.length); karsilamaYenile(); imzaUstuCiz(); }
 
 /* --- imzala --- */

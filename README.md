@@ -1,5 +1,6 @@
 # Signature Watermark · İmza Filigranı
 
+Site: https://feridun35.github.io/SignatureWatermark/
 Kaynak: https://github.com/feridun35/SignatureWatermark
 
 Kendi imzanı PDF ve HTML dosyalarına vektör filigran olarak basan, **tamamen tarayıcıda çalışan** statik site. Hiçbir dosya sunucuya gitmez.
@@ -20,7 +21,7 @@ python -m http.server 8765
 Sonra `http://127.0.0.1:8765` adresini aç.
 
 ## Yayınlama (ücretsiz, statik)
-Klasör GitHub Pages, Netlify ya da Cloudflare Pages'e olduğu gibi yüklenir. Derleme adımı yok. Kod GitHub'da; site henüz bir adreste yayında değil.
+GitHub Pages'te `main` dalının kökünden yayınlanır: https://feridun35.github.io/SignatureWatermark/ . Derleme adımı yok; `main`'e gönderilen her değişiklik birkaç dakikada yayına çıkar.
 
 ## Davranış
 - İmza: SVG (yalnız `<path>`) ise vektör olarak PDF'e çizilir. Karmaşık SVG ve PNG/JPG/WEBP yüksek çözünürlüklü şeffaf resme çevrilir (beyaz arka plan otomatik temizlenir). "Elle çiz" ile çizilen imza vektördür.
